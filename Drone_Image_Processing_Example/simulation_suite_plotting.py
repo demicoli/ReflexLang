@@ -48,70 +48,62 @@ def plot_experiment_1(results_file, output_dir):
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 4.2), sharex=True)
 
-    # Queue Fill Level Plot
-    ax1.plot(complex_data['queue_time_stamps'],
-             complex_data['queue_sizes'],
-             label='Conventional System',
+    smoothed_dropped_frames_complex = butter_lowpass_filter(complex_data['dropped_frames_over_time'], 10, 30)
+    smoothed_dropped_frames_reflex_only = butter_lowpass_filter(reflex_only_data['dropped_frames_over_time'], 10, 30)
+    smoothed_dropped_frames_reflex = butter_lowpass_filter(reflex_data['dropped_frames_over_time'], 10, 30)
+
+    ax1.plot(complex_data['dropped_frames_time_stamps'],
+             smoothed_dropped_frames_complex,
+             label='Complex-Only System',
              color='#E7004C', linewidth=0.7)
-    ax1.plot(reflex_only_data['queue_time_stamps'],
-             reflex_only_data['queue_sizes'],
+    ax1.plot(reflex_only_data['dropped_frames_time_stamps'],
+             smoothed_dropped_frames_reflex_only,
              label='Reflex-Only System',
              color='#E7004C', linestyle='dashed',
              linewidth=0.7)
-    ax1.plot(reflex_data['queue_time_stamps'],
-             reflex_data['queue_sizes'],
+    ax1.plot(reflex_data['dropped_frames_time_stamps'],
+             smoothed_dropped_frames_reflex,
              label='Reflex-Enabled System',
              color='#3A8DDE',
              linewidth=0.7)
 
-    # Shade Reflex intervals
-    secondary_intervals = []
-    start = None
-    for i in range(1, len(reflex_data['inference_active_system'])):
-        prev_state = reflex_data['inference_active_system'][i - 1]
-        current_state = reflex_data['inference_active_system'][i]
-        if current_state == 'reflex' and prev_state == 'complex':
-            start = reflex_data['queue_time_stamps'][i]
-        elif current_state == 'complex' and prev_state == 'reflex':
-            end = reflex_data['queue_time_stamps'][i]
-            if start is not None:
-                secondary_intervals.append((start, end))
-                start = None
-
-    if reflex_data['inference_active_system'][-1] == 'reflex' and start is not None:
-        secondary_intervals.append((start, reflex_data['queue_time_stamps'][-1]))
-
-    for interval in secondary_intervals:
-        ax1.axvspan(interval[0], interval[1], color='#FF7F41', alpha=0.2)
-
-    handles = (ax1.get_legend_handles_labels()[0]
-               + [mpatches.Patch(color='#FF7F41', alpha=0.2, label='Reflex Algorithm Active')])
-
-    ax1.legend(handles=handles, fontsize=8,
+    ax1.legend(fontsize=8,
                loc='lower right')
-    ax1.set_title('(a) Queue Fill (%) Level Over Time', fontsize=10)
-    ax1.set_ylim(0, 105)
+    ax1.set_title('(a) Dropped Frames per Second Over Time', fontsize=10)
+    # Add a grid
+    ax1.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
+    ax1.set_yticks([0, 1, 2])
+    ax1.set_ylim(-0.2, 3)
     ax1.set_xlim(0, 100)
 
-    # FPS Plot
+    time_stamps_complex = sorted(results['complex']['mAP_per_second'].keys())
+    time_stamps_simple = sorted(results['simple']['mAP_per_second'].keys())
+    time_stamps_reflex = sorted(results['reflex']['mAP_per_second'].keys())
+
+    mAP_values_complex_only = [results['complex']['mAP_per_second'][t] for t in time_stamps_complex]
+    mAP_values_reflex_only = [results['simple']['mAP_per_second'][t] for t in time_stamps_simple]
+    mAP_values_reflex = [results['reflex']['mAP_per_second'][t] for t in time_stamps_reflex]
+
+    smoothed_map_per_second_complex = butter_lowpass_filter(mAP_values_complex_only, 3, 30)
+    smoothed_map_per_second_reflex_only = butter_lowpass_filter(mAP_values_reflex_only, 5, 30)
+    smoothed_map_per_second_reflex = butter_lowpass_filter(mAP_values_reflex, 3, 30)
     ax2.plot(complex_data['fps_time_stamps'],
-             complex_data['fps_over_time'],
-             label='Conventional System',
-             color='#E7004C',
-             linewidth=0.7)
+             smoothed_map_per_second_complex,
+             label='Complex-Only System',
+             color='#E7004C', linewidth=0.7)
     ax2.plot(reflex_only_data['fps_time_stamps'],
-             reflex_only_data['fps_over_time'],
+             smoothed_map_per_second_reflex_only,
              label='Reflex-Only System',
-             color='#E7004C',
-             linestyle='dashed',
+             color='#E7004C', linestyle='dashed',
              linewidth=0.7)
     ax2.plot(reflex_data['fps_time_stamps'],
-             reflex_data['fps_over_time'],
+             smoothed_map_per_second_reflex,
              label='Reflex-Enabled System',
              color='#3A8DDE',
              linewidth=0.7)
-    ax2.set_title(f'(b) Frames per second (FPS) Over Time', fontsize=10)
-    ax2.set_ylim(0, 18)  # FPS over time.
+    ax2.set_title(f'(b) mAP per second Over Time', fontsize=10)
+    # Add a grid
+    ax2.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     ax2.set_xlim(0, 100)
 
     # CPU Usage Plot
@@ -136,13 +128,16 @@ def plot_experiment_1(results_file, output_dir):
              color='#3A8DDE',
              linewidth=0.7)
     ax3.set_xlabel('Time (s)', fontsize=10)
-    ax3.set_title(f'(c) Processor utilization (%) Over Time', fontsize=10)
-    ax3.set_ylim(30, 110)
+    ax3.set_title(f'(c) Processor Utilization (%) Over Time', fontsize=10)
+    ax3.set_ylim(0, 110)
+    ax3.set_yticks([0, 20, 40, 60, 80, 100])
     ax3.set_xlim(0, 100)
+
+    # Add a grid
+    ax3.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
 
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f'experiment_1_results.pdf'), dpi=300)
-    plt.close()
 
 
 def plot_experiment_2(results_file, output_dir):
@@ -205,9 +200,9 @@ def plot_experiment_2(results_file, output_dir):
             cumulated_dropped_frames_over_time = np.cumsum(delay_data['dropped_frames_over_time']).tolist()
             plt.plot(delay_data['dropped_frames_time_stamps'], cumulated_dropped_frames_over_time, label=f'Delay = {delay}s')
 
-        plt.title('Error Rate Over Time for Different Switching Delays')
+        plt.title('Accumulated Dropped Frames for Different Switching Delays')
         plt.xlabel('Time (s)')
-        plt.ylabel('Cumulative Dropped Frames (%)')
+        plt.ylabel('Accumulated Dropped Frames (%)')
         plt.legend(loc='upper right')
         plt.grid(True)
         plt.tight_layout()
@@ -226,6 +221,7 @@ def main():
     plot_experiment_1(results_file_experiment_1, output_dir)
     results_file_experiment_2 = 'simulation_results/experiment_2_results.json'
     plot_experiment_2(results_file_experiment_2, output_dir)
+
 
 if __name__ == '__main__':
     main()

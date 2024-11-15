@@ -32,8 +32,8 @@ Service DroneImageProcessing {
     Monitoring_Block QueueLengthMonitor {
         Inputs: Queue_length
         Threshold_Monitoring {
-            Activate_Threshold: 80
-            Deactivate_Threshold: 60
+            Activate_Threshold: 40
+            Deactivate_Threshold: 30
         }
     }
     State_Management {

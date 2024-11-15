@@ -153,6 +153,7 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
            dict: Collected data and metrics from the experiment
        """
     # Initialize metrics
+    images_per_time_stamp = {}
     detections = []
     inference_times = []
     total_frames, dropped_frames, dropped_frames_in_interval = 0, 0, 0
@@ -219,6 +220,7 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
     def image_processing():
         """Process images from the queue and measure processing performance."""
         nonlocal total_frames, complex_frames, simple_frames, frames_in_interval
+        image_ids_in_interval = []
         interval_start_time = start_time
         while True:
             current_time = time.time()
@@ -243,6 +245,7 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
                 continue
             # Collect image IDs and convert to RGB
             image_id_list.append(image_id)
+            image_ids_in_interval.append(image_id)
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             # Simulate CPU load fluctuation
@@ -251,7 +254,7 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
             elif mode == 'complex':
                 service_instance.resource_manager.set_queue_length(0)  # Low simulated load to trigger complex algorithm
             else:  # If mode Simple
-                service_instance.resource_manager.set_queue_length(90)  # High simulated load to trigger reflex algorithm
+                service_instance.resource_manager.set_queue_length(int(0.9*max_queue_size))  # High simulated load to trigger reflex algorithm
 
             # Run detection
             inference_start = time.time()
@@ -282,9 +285,12 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
             if current_time - interval_start_time >= 1.0:
                 fps = frames_in_interval / (current_time - interval_start_time)
                 fps_over_time.append(fps)
-                fps_time_stamps.append(current_time - start_time)
+                time_stamp = current_time - start_time
+                fps_time_stamps.append(time_stamp)
+                images_per_time_stamp[int(time_stamp)] = image_ids_in_interval.copy()
                 interval_start_time = current_time
                 frames_in_interval = 0
+                image_ids_in_interval = []
 
             # Extract detections
             preds = results.xywh[0]  # [x_center, y_center, w, h, conf, class]
@@ -343,7 +349,8 @@ def run_experiment(mode='complex', delay='0', test_duration=150, arrival_rate=10
         'cpu_time_stamps': cpu_time_stamps,
         'inference_active_system': inference_active_system,
         'dropped_frames_over_time': dropped_frames_over_time,
-        'dropped_frames_time_stamps': dropped_frames_time_stamps
+        'dropped_frames_time_stamps': dropped_frames_time_stamps,
+        'images_per_time_stamp': images_per_time_stamp
     }
 
 
@@ -359,16 +366,55 @@ def evaluate_detections(detections_file, image_id_list):
     return coco_eval.stats[0]  # map -> AP@[IoU=0.50:0.95 | area=all | maxDets=100]
 
 
+def evaluate_detections_per_time_stamp(detections_file, images_per_time_stamp):
+    """Evaluate detection results per time stamp using COCO API and calculate mAP per second."""
+    with open(detections_file, 'r') as f:
+        all_detections = json.load(f)
+
+    detections_by_image = {}
+    for det in all_detections:
+        image_id = det['image_id']
+        if image_id not in detections_by_image:
+            detections_by_image[image_id] = []
+        detections_by_image[image_id].append(det)
+
+    mAP_per_second = {}
+    for time_stamp in sorted(images_per_time_stamp.keys()):
+        image_ids = images_per_time_stamp[time_stamp]
+        detections = []
+        for image_id in image_ids:
+            if image_id in detections_by_image:
+                detections.extend(detections_by_image[image_id])
+        if not detections:
+            mAP_per_second[time_stamp] = 0.0
+            continue
+        detections_temp_file = os.path.join(output_dir, f'detections_{time_stamp}.json')
+        with open(detections_temp_file, 'w') as f:
+            json.dump(detections, f)
+        coco_dt = coco_gt.loadRes(detections_temp_file)
+        coco_eval = COCOeval(coco_gt, coco_dt, iouType='bbox')
+        coco_eval.params.imgIds = image_ids
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
+        mAP_per_second[time_stamp] = coco_eval.stats[0]
+        os.remove(detections_temp_file)
+    return mAP_per_second
+
+
+
 def experiment_1():
     """Run Experiment 1: Evaluate Reflex vs. Non-Reflex Systems."""
     results = {}
     for mode in ['complex', 'simple', 'reflex']:
         print(f"\nRunning experiment: {mode.upper()}")
-        experiment_data = run_experiment(mode=mode, delay='0', test_duration=150)
+        experiment_data = run_experiment(mode=mode, delay='0', test_duration=150, arrival_rate=4, max_queue_size=50)
         mAP = evaluate_detections(experiment_data['detections_file'], experiment_data['image_id_list'])
-
+        mAP_per_second = evaluate_detections_per_time_stamp(experiment_data['detections_file'],
+                                                            experiment_data['images_per_time_stamp'])
         results[mode] = {
             'mAP': mAP,
+            'mAP_per_second': mAP_per_second,
             'total_frames': experiment_data['total_frames'],
             'dropped_frames': experiment_data['dropped_frames'],
             'inference_active_system': experiment_data['inference_active_system'],
@@ -377,7 +423,9 @@ def experiment_1():
             'fps_time_stamps': experiment_data['fps_time_stamps'],
             'fps_over_time': experiment_data['fps_over_time'],
             'cpu_usage_over_time': experiment_data['cpu_usage_over_time'],
-            'cpu_time_stamps': experiment_data['cpu_time_stamps']
+            'cpu_time_stamps': experiment_data['cpu_time_stamps'],
+            'dropped_frames_over_time': experiment_data['dropped_frames_over_time'],
+            'dropped_frames_time_stamps': experiment_data['dropped_frames_time_stamps']
         }
         results_file = os.path.join(output_dir, 'experiment_1_results.json')
         with open(results_file, 'w') as f:

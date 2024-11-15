@@ -3,8 +3,8 @@
 class QueueLengthMonitor:
     def __init__(self, resource_manager):
         self.resource_manager = resource_manager
-        self.activate_threshold = 80.0
-        self.deactivate_threshold = 60.0
+        self.activate_threshold = 40.0
+        self.deactivate_threshold = 30.0
         self.active = False
 
     def check(self):
