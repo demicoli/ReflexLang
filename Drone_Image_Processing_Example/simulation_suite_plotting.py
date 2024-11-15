@@ -85,7 +85,7 @@ def plot_experiment_1(results_file, output_dir):
     mAP_values_reflex = [results['reflex']['mAP_per_second'][t] for t in time_stamps_reflex]
 
     smoothed_map_per_second_complex = butter_lowpass_filter(mAP_values_complex_only, 3, 30)
-    smoothed_map_per_second_reflex_only = butter_lowpass_filter(mAP_values_reflex_only, 5, 30)
+    smoothed_map_per_second_reflex_only = butter_lowpass_filter(mAP_values_reflex_only, 3, 30)
     smoothed_map_per_second_reflex = butter_lowpass_filter(mAP_values_reflex, 3, 30)
     ax2.plot(complex_data['fps_time_stamps'],
              smoothed_map_per_second_complex,
